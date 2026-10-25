@@ -1,0 +1,47 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OpsLens</title><style>
+:root{--bg:#0f1720;--card:#18222e;--tx:#e6edf3;--mu:#8b9bb0;--ac:#4ea1ff;--rd:#ff6b6b;--gr:#3ddc97;--am:#ffc857}
+*{box-sizing:border-box}body{margin:0;font:14px/1.5 Calibri,Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--tx)}
+header{display:flex;gap:12px;align-items:center;padding:14px 22px;border-bottom:1px solid #26323f;flex-wrap:wrap}
+h1{font-size:20px;margin:0;color:var(--ac)}select,input,button{background:#22303f;color:var(--tx);border:1px solid #33465a;border-radius:6px;padding:7px 10px;font:inherit}
+button{background:var(--ac);color:#06121f;border:0;font-weight:700;cursor:pointer}
+main{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px;padding:18px 22px}
+.card{background:var(--card);border-radius:10px;padding:14px 16px}.card h2{margin:0 0 8px;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--mu)}
+.wide{grid-column:1/-1}canvas{width:100%;height:190px}code,pre{font-family:Consolas,monospace;font-size:12.5px}
+pre{background:#0c131b;padding:8px 10px;border-radius:6px;margin:4px 0;overflow-x:auto}.tag{padding:2px 8px;border-radius:99px;font-weight:700;font-size:12px}
+.P1{background:var(--rd);color:#200}.P2{background:var(--am);color:#210}.P3{background:var(--gr);color:#021}
+.ok{color:var(--gr)}.bad{color:var(--rd)}.mu{color:var(--mu)}table{width:100%;border-collapse:collapse}td{padding:4px 6px;border-top:1px solid #26323f;vertical-align:top}
+.leg span{margin-right:12px;font-size:12px}</style></head><body>
+<header><h1>OpsLens</h1><span class="mu">Cloud incident console</span><span style="flex:1"></span>
+<select id="sc"></select><button onclick="run()">Run scenario</button></header>
+<main>
+<div class="card wide"><h2>Error rate by service, percent</h2><canvas id="c1"></canvas><div class="leg" id="leg"></div></div>
+<div class="card"><h2>Incident and ticket</h2><div id="inc"></div></div>
+<div class="card"><h2>Root cause ranking</h2><div id="rc"></div></div>
+<div class="card"><h2>New log patterns during incident</h2><div id="lg"></div></div>
+<div class="card"><h2>Runbook</h2><div id="rb"></div></div>
+<div class="card wide"><h2>Alerts</h2><div id="al"></div></div>
+<div class="card wide"><h2>Network diagnosis</h2>
+<input id="h" value="localhost" placeholder="host"> <input id="p" value="8000" size="6"> <button onclick="nd()">Diagnose</button><div id="nd"></div></div>
+</main><script>
+const COL={web:'#4ea1ff',api:'#3ddc97',auth:'#ffc857',cache:'#c792ea',db:'#ff6b6b'};const $=i=>document.getElementById(i);
+const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+async function run(){const r=await (await fetch('/api/run?scenario='+($('sc').value||'db_disk_full'))).json();
+ if(!$('sc').options.length){r.scenarios.forEach(s=>$('sc').add(new Option(s.replaceAll('_',' '),s)));$('sc').value=r.scenario}
+ draw(r.chart);$('leg').innerHTML=Object.keys(COL).map(k=>`<span style="color:${COL[k]}">&#9632; ${k}</span>`).join('');
+ const i=r.incidents[0];if(!i){$('inc').textContent='No incident detected';return}
+ const t=i.ticket;$('inc').innerHTML=`<span class="tag ${t.severity}">${t.severity}</span> affected: ${i.services.join(', ')}<table>
+ <tr><td>Fault started</td><td>minute ${r.truth.start} (${r.truth.service})</td></tr><tr><td>First alert</td><td>minute ${t.opened_minute}, detected in ${t.time_to_detect_min} min</td></tr>
+ <tr><td>Respond by</td><td>minute ${t.respond_by}</td></tr><tr><td>Resolve by</td><td>minute ${t.resolve_by}</td></tr></table>`;
+ $('rc').innerHTML='<table>'+i.root_cause.map((x,n)=>`<tr><td><b class="${n?'':'bad'}">${x.service}</b></td><td class="mu">${esc(x.reason)}</td></tr>`).join('')+'</table>';
+ $('lg').innerHTML=i.log_patterns.map(p=>`<pre>${p.count}x ${esc(p.template)}</pre>`).join('')||'<span class="mu">none</span>';
+ $('rb').innerHTML=`<b>${esc(i.runbook.title)}</b>`+i.runbook.steps.map(s=>`<pre>${esc(s)}</pre>`).join('');
+ $('al').innerHTML='<table>'+i.alerts.slice(0,12).map(a=>`<tr><td>min ${a.minute}</td><td>${a.service}</td><td>${a.kind}</td><td class="mu">${esc(a.detail)}</td></tr>`).join('')+'</table>'}
+function draw(ch){const c=$('c1'),d=devicePixelRatio||1;c.width=c.clientWidth*d;c.height=c.clientHeight*d;const g=c.getContext('2d');g.scale(d,d);
+ const W=c.clientWidth,H=c.clientHeight,mx=Math.max(1,...Object.values(ch).flatMap(v=>v.err));g.clearRect(0,0,W,H);g.strokeStyle='#26323f';g.fillStyle='#8b9bb0';
+ for(let k=0;k<=4;k++){const y=H-18-(H-28)*k/4;g.beginPath();g.moveTo(34,y);g.lineTo(W,y);g.stroke();g.fillText((mx*k/4).toFixed(0),2,y+4)}
+ for(const[s,v]of Object.entries(ch)){g.beginPath();g.strokeStyle=COL[s];g.lineWidth=1.6;v.err.forEach((e,i)=>{const x=34+(W-38)*i/(v.err.length-1),y=H-18-(H-28)*e/mx;i?g.lineTo(x,y):g.moveTo(x,y)});g.stroke()}
+ g.fillStyle='#8b9bb0';g.fillText('minute 0',34,H-4);g.fillText('minute 360',W-60,H-4)}
+async function nd(){const r=await (await fetch(`/api/netdiag?host=${encodeURIComponent($('h').value)}&port=${$('p').value}`)).json();
+ $('nd').innerHTML=r.error?esc(r.error):'<table>'+r.steps.map(s=>`<tr><td class="${s.ok?'ok':'bad'}">${s.ok?'PASS':'FAIL'}</td><td>${s.layer}</td><td>${s.ms} ms</td><td class="mu">${esc(s.detail)}</td></tr>`).join('')+`</table><p><b>${esc(r.verdict)}</b> ${esc(r.fix)}</p>`}
+run();</script></body></html>
