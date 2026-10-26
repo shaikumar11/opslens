@@ -12,21 +12,22 @@ from .netdiag import diagnose
 STATIC = os.path.join(os.path.dirname(__file__), "static", "index.html")
 
 
-def is_public(host):
-    """True only if every address the host resolves to is a public one.
+def check_host(host):
+    """Return (True, "") if every resolved address is public, else (False, reason).
 
     Stops the public site being used to probe private or internal addresses.
     """
     try:
         addrs = {a[4][0] for a in socket.getaddrinfo(host, None)}
     except (socket.gaierror, UnicodeError):
-        return False
+        return False, "could not resolve that host name"
+    if not addrs:
+        return False, "could not resolve that host name"
     for addr in addrs:
         ip = ipaddress.ip_address(addr.split("%")[0])
-        if (ip.is_private or ip.is_loopback or ip.is_link_local
-                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
-            return False
-    return bool(addrs)
+        if ip.is_multicast or not ip.is_global:
+            return False, f"{host} resolves to a non public address ({ip})"
+    return True, ""
 
 
 class H(BaseHTTPRequestHandler):
@@ -52,8 +53,9 @@ class H(BaseHTTPRequestHandler):
                 return self._send(400, {"error": "port must be between 1 and 65535"})
             if not host:
                 return self._send(400, {"error": "host required"})
-            if not is_public(host):
-                return self._send(400, {"error": "host must be a public address"})
+            ok, reason = check_host(host)
+            if not ok:
+                return self._send(400, {"error": reason})
             return self._send(200, diagnose(host, port))
         self._send(404, {"error": "not found"})
 
